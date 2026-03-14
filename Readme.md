@@ -273,16 +273,3 @@ The app is deployed on Streamlit Cloud:
    ```
 6. Deploy!
 
----
-
-## 📄 License
-
-This project was built as part of the **NeoStats AI Engineer Case Study** — *The Chatbot Blueprint: Imagine, Build, Solve.*
-
----
-
-<div align="center">
-
-Built with ❤️ by **Giradhar Gopal Kumar**
-
-</div>
