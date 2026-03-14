@@ -7,9 +7,6 @@
 *Ask questions. Get answers. From your own company's docs.*
 
 [![Live Demo](https://img.shields.io/badge/🚀%20Live%20Demo-Streamlit-FF4B4B?style=for-the-badge)](https://stackassist-ai-neostats.streamlit.app)
-[![GitHub](https://img.shields.io/badge/GitHub-StackAssist--AI-181717?style=for-the-badge&logo=github)](https://github.com/Giradhar744/StackAssist-AI)
-
-
 </div>
 
 ---
@@ -35,20 +32,8 @@ Company C loads → GCP + Flutter + Rails docs   → developers ask about their 
 ## 🖼️ Screenshots
 
 ### System Architecture
-> *Add your architecture diagram screenshot here*
-
-```
-<!-- Replace this block with your architecture image -->
 ![System Architecture](assets/architecture.png)
-```
 
-
-> **How to add screenshots:**
-> 1. Create an `assets/` folder in your repo root
-> 2. Add your screenshots there
-> 3. Replace the placeholder paths above with your actual image filenames
-
----
 
 ## ✨ Features
 
