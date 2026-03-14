@@ -1,6 +1,5 @@
-import os
 from langchain_google_genai import ChatGoogleGenerativeAI
-from config.config import GEMINI_LLM_MODEL
+from config.config import GEMINI_LLM_MODEL, get_google_api_key
 
 
 def get_chatgemini_model():
@@ -8,8 +7,8 @@ def get_chatgemini_model():
 
     try:
         gemini_model = ChatGoogleGenerativeAI(
-            model= GEMINI_LLM_MODEL,
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+            model=GEMINI_LLM_MODEL,
+            google_api_key=get_google_api_key(),
             temperature=0.2
         )
 
