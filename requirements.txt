@@ -3,7 +3,6 @@ streamlit==1.45.1
 python-dotenv==1.2.2
 
 # %% Torch CPU only %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# Required by sentence-transformers/HuggingFace for local embeddings (CPU)
 torch==2.6.0
 
 # %% ML / Embeddings %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -17,18 +16,16 @@ scipy==1.15.3
 numpy==2.2.6
 
 # %% LangChain %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# All langchain packages must be version-aligned to avoid core conflicts
 langchain==0.3.25
-langchain-core==0.3.55
+langchain-core==0.3.58
 langchain-community==0.3.23
 langchain-text-splitters==0.3.8
 langchain-openai==0.3.16
 langchain-groq==0.3.2
 langchain-google-genai==2.1.4
 langchain-huggingface==0.1.2
-langchain-classic==0.1.0
 langgraph==0.2.73
-langgraph-checkpoint==2.0.26
+langgraph-checkpoint==2.1.2
 langgraph-sdk==0.1.69
 langsmith==0.3.41
 
