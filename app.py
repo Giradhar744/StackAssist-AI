@@ -17,7 +17,7 @@ from models.llm import get_chatgemini_model
 from utils.vector_store import load_vector_store, create_vector_store, vector_store_exists
 from utils.document_loader import load_documents
 from utils.text_splitter import split_documents
-from utils.prompt import generate_rag_response, RateLimitError
+from utils.prompt import generate_rag_response_stream, RateLimitError
 from utils.hybrid_retrievers import create_hybrid_retriever
 
 from config.config import VECTOR_DB_PATH, KNOWLEDGE_BASE_PATH, RETRIEVER_TOP_K
@@ -131,6 +131,7 @@ def chat_page():
 
     if prompt := st.chat_input("Ask anything about PostgreSQL, FastAPI, Docker or AWS..."):
 
+        # Add user message to history and display it
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -138,10 +139,10 @@ def chat_page():
         total_start = time.time()
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    if retriever is not None:
-                        response = generate_rag_response(
+            try:
+                if retriever is not None:
+                    response = st.write_stream(
+                        generate_rag_response_stream(
                             llm=llm,
                             retriever=retriever,
                             query=prompt,
@@ -149,31 +150,35 @@ def chat_page():
                             use_web_fallback=use_web_search,
                             chat_history=st.session_state.messages[:-1],
                         )
-                    else:
-                        system_prompt = (
-                            "You are StackAssist AI, a helpful internal developer assistant "
-                            "specialising in PostgreSQL, FastAPI, Docker, and AWS. "
-                            "Answer clearly and honestly. If you're not sure, say so."
-                        )
+                    )
+                else:
+                    system_prompt = (
+                        "You are StackAssist AI, a helpful internal developer assistant "
+                        "specialising in PostgreSQL, FastAPI, Docker, and AWS. "
+                        "Answer clearly and honestly. If you're not sure, say so."
+                    )
+                    with st.spinner("Thinking..."):
                         response = get_chat_response(
                             llm, st.session_state.messages, system_prompt
                         )
+                    st.markdown(response)
 
-                # Rate limit — show friendly warning
-                except RateLimitError as e:
-                    response = (
-                        "⚠️ **API rate limit reached.**\n\n"
-                        "The Gemini or search API is temporarily unavailable due to quota limits. "
-                        "Please wait a moment and try again.\n\n"
-                        f"_Details: {str(e)}_"
-                    )
-                    st.warning("Rate limit hit — please wait before sending another message.")
+            # Rate limit — show friendly warning
+            except RateLimitError as e:
+                response = (
+                    "⚠️ **API rate limit reached.**\n\n"
+                    "The Gemini or search API is temporarily unavailable due to quota limits. "
+                    "Please wait a moment and try again.\n\n"
+                    f"_Details: {str(e)}_"
+                )
+                st.warning("Rate limit hit — please wait before sending another message.")
+                st.markdown(response)
 
-                except RuntimeError as e:
-                    response = f"⚠️ Something went wrong: {str(e)}"
+            except RuntimeError as e:
+                response = f"⚠️ Something went wrong: {str(e)}"
+                st.markdown(response)
 
             total_latency = time.time() - total_start
-            st.markdown(response)
             st.caption(f"⚡ Response time: {total_latency:.2f}s")
 
         st.session_state.messages.append({"role": "assistant", "content": response})

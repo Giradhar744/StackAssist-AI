@@ -90,7 +90,7 @@ Rewritten query:"""
         err = str(e)
         if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
             print(f"⚠️ Rate limit on rewrite — using original query: '{query}'")
-            return query  # safe fallback, don't raise here
+            return query
         print(f"⚠️ Query rewrite failed — using original: {e}")
         return query
 
@@ -115,7 +115,7 @@ def get_retriever(vector_store, top_k: int = 4):
     return vector_store.as_retriever(search_kwargs={"k": top_k})
 
 
-def generate_rag_response(
+def generate_rag_response_stream(
     llm,
     retriever,
     query: str,
@@ -124,38 +124,39 @@ def generate_rag_response(
     chat_history: list = None
 ):
     """
-    Full RAG pipeline with rate limit fallback to web search:
-    1. Smalltalk → respond naturally
+    Full RAG pipeline with streaming support and rate limit fallback to web search:
+    1. Smalltalk → respond naturally (streamed)
     2. Rewrite query using history (tiny LLM call)
     3. Retrieve docs from KB
     4. Check relevance → web search if needed
-    5. Generate answer with Gemini
-       └── If Gemini rate limited → return web search results directly
+    5. Stream answer with Gemini
+       └── If Gemini rate limited → yield web search results directly
     """
 
     try:
         chat_history = chat_history or []
 
-        # Step 1: Smalltalk 
+        # Step 1: Smalltalk
         if is_smalltalk(query):
             try:
                 response = llm.invoke(SMALLTALK_RESPONSE.format(query=query))
-                return response.content
+                yield response.content
+                return
             except Exception as e:
                 err = str(e)
                 if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-                    # Even for smalltalk, fall back gracefully
-                    return (
+                    yield (
                         "👋 Hi! I'm StackAssist AI.\n\n"
                         "⚠️ The AI is temporarily rate-limited. "
                         "Please try again in a few minutes!"
                     )
+                    return
                 raise
 
-        # Step 2: Rewrite query (gracefully falls back on rate limit) 
+        # Step 2: Rewrite query (gracefully falls back on rate limit)
         search_query = rewrite_query(llm, query, chat_history)
 
-        # Step 3: Retrieve docs 
+        # Step 3: Retrieve docs
         docs = retriever.invoke(search_query)
 
         context = ""
@@ -164,8 +165,8 @@ def generate_rag_response(
         if docs:
             context = "\n\n".join([doc.page_content for doc in docs])
 
-        # Step 4: Web search if context not relevant 
-        web_results_cache = None  # cache in case we need it for rate limit fallback
+        # Step 4: Web search if context not relevant
+        web_results_cache = None
 
         if not is_context_relevant(context, search_query) and use_web_fallback:
             print(f"🌐 KB not relevant — web searching: '{search_query}'")
@@ -186,13 +187,13 @@ def generate_rag_response(
             context = "No relevant context available."
             source = "none"
 
-        #  Step 5: Response mode 
+        # Step 5: Response mode
         if mode == "Detailed":
             instruction = "Provide a detailed answer with clear explanation and examples. Use steps if needed."
         else:
             instruction = "Provide a short, clear and friendly answer in 3-5 lines."
 
-        # Step 6: Call Gemini — with rate limit fallback to web search
+        # Step 6: Stream from Gemini — with rate limit fallback to web search
         prompt_template = """
 You are StackAssist AI, a warm and helpful internal developer assistant for engineers.
 You specialize in PostgreSQL, FastAPI, Docker, and AWS — but you can answer general questions too.
@@ -226,32 +227,36 @@ Answer:"""
         )
 
         try:
-            response = llm.invoke(final_prompt)
-            return response.content
+            for chunk in llm.stream(final_prompt):
+                yield chunk.content
+            return
 
         except Exception as e:
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
                 print(f"⚠️ Gemini rate limited on generation — falling back to web search")
 
-                #  Use cached web results if already fetched 
+                # Use cached web results if already fetched
                 if web_results_cache:
-                    return format_web_results_for_user(query, web_results_cache)
+                    yield format_web_results_for_user(query, web_results_cache)
+                    return
 
                 # Otherwise fetch web results now
-                    try:
-                        fresh_web = web_search(search_query)
-                        if fresh_web and "Web search error" not in fresh_web:
-                            return format_web_results_for_user(query, fresh_web)
-                    except Exception as web_err:
-                        print(f"⚠️ Web search also failed: {web_err}")
+                try:
+                    fresh_web = web_search(search_query)
+                    if fresh_web and "Web search error" not in fresh_web:
+                        yield format_web_results_for_user(query, fresh_web)
+                        return
+                except Exception as web_err:
+                    print(f"⚠️ Web search also failed: {web_err}")
 
-                # Both failed — return clean message 
-                return (
+                # Both failed — yield clean message
+                yield (
                     "⚠️ **AI temporarily unavailable** (API rate limit reached) "
                     "and web search fallback also failed.\n\n"
                     "Please try again in a few minutes."
                 )
+                return
 
             raise RuntimeError(f"LLM generation failed: {err}")
 
