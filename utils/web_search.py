@@ -1,7 +1,8 @@
 # utils/web_search.py
 
 import time
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
+import random
+from duckduckgo_search import DDGS
 
 
 class RateLimitError(Exception):
@@ -14,18 +15,37 @@ class WebSearchError(Exception):
     pass
 
 
-def web_search(query: str, num_results: int = 5, retries: int = 2) -> str:
+# KB topics — if query is unrelated, skip KB and go straight to web
+KB_TOPICS = [
+    "postgresql", "postgres", "sql", "database", "db", "query", "table", "index",
+    "fastapi", "api", "endpoint", "rest", "http", "router", "pydantic",
+    "docker", "container", "image", "compose", "dockerfile", "kubernetes", "k8s",
+    "aws", "amazon", "ec2", "s3", "lambda", "rds", "iam", "vpc", "cloud",
+    "python", "pip", "venv", "uvicorn", "gunicorn",
+]
+
+
+def is_kb_relevant_query(query: str) -> bool:
+    """Returns True if query is likely answerable from the KB."""
+    q = query.lower()
+    return any(topic in q for topic in KB_TOPICS)
+
+
+def web_search(query: str, num_results: int = 5, retries: int = 3) -> str:
     """
-    Perform web search using DuckDuckGo.
-    - Retries on transient errors
-    - Raises RateLimitError if rate limited
-    - Raises WebSearchError on other failures
+    Perform web search using DuckDuckGo DDGS with retry + backoff.
+    Rotates backends to avoid rate limits.
     """
 
+    backends = ["lite", "html", "api"]
+
     for attempt in range(retries):
+        backend = backends[attempt % len(backends)]
+        wait = 2 ** attempt + random.uniform(0, 1)  # exponential backoff
+
         try:
-            search = DuckDuckGoSearchAPIWrapper()
-            results = search.results(query, num_results)
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=num_results, backend=backend))
 
             if not results:
                 return "No relevant web results found."
@@ -33,10 +53,10 @@ def web_search(query: str, num_results: int = 5, retries: int = 2) -> str:
             formatted_results = []
             for r in results:
                 title = r.get("title", "No Title")
-                snippet = r.get("snippet", "No snippet available")
-                link = r.get("link", "")
+                snippet = r.get("body", "No snippet available")
+                link = r.get("href", "")
                 formatted_results.append(
-                    f"Title: {title}\nSnippet: {snippet}\nSource: {link}"
+                    f"**{title}**\n{snippet}\nSource: {link}"
                 )
 
             return "\n\n".join(formatted_results)
@@ -44,17 +64,18 @@ def web_search(query: str, num_results: int = 5, retries: int = 2) -> str:
         except Exception as e:
             err = str(e).lower()
 
-            # Rate limit detection 
-            if any(keyword in err for keyword in ["ratelimit", "rate limit", "429", "too many requests"]):
+            if any(k in err for k in ["ratelimit", "rate limit", "429", "202", "too many"]):
+                if attempt < retries - 1:
+                    print(f"⚠️ DuckDuckGo rate limit (backend={backend}), waiting {wait:.1f}s before retry...")
+                    time.sleep(wait)
+                    continue
                 raise RateLimitError(
-                    f"DuckDuckGo rate limit hit. Please wait a moment and try again.\nDetails: {str(e)}"
+                    f"DuckDuckGo rate limit hit after {retries} attempts. Details: {str(e)}"
                 )
 
-            # Retry on transient errors 
             if attempt < retries - 1:
-                print(f"⚠️ Web search attempt {attempt + 1} failed: {e}. Retrying...")
-                time.sleep(2)
+                print(f"⚠️ Web search attempt {attempt+1} failed: {e}. Retrying in {wait:.1f}s...")
+                time.sleep(wait)
                 continue
 
-            # Final failure 
             raise WebSearchError(f"Web search failed after {retries} attempts: {str(e)}")

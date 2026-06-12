@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from models.llm import get_chatgemini_model
+from models.llm import get_chatgemini_model, get_all_llms
 from utils.vector_store import load_vector_store, create_vector_store, vector_store_exists
 from utils.document_loader import load_documents
 from utils.text_splitter import split_documents
@@ -29,8 +29,16 @@ def load_llm():
     try:
         return get_chatgemini_model()
     except Exception as e:
-        st.error(f"⚠️ Could not load Gemini model: {e}")
+        st.error(f"⚠️ Could not load model: {e}")
         return None
+
+
+@st.cache_resource(show_spinner="Loading all available models...")
+def load_all_llms():
+    try:
+        return get_all_llms()
+    except Exception as e:
+        return []
 
 
 @st.cache_resource(show_spinner="Loading knowledge base index...")
@@ -113,6 +121,7 @@ def chat_page():
             st.warning("⚠️ Index not built yet")
 
     llm = load_llm()
+    llm_list = load_all_llms()
     retriever = load_knowledge_base()
 
     if llm is None:
@@ -149,6 +158,7 @@ def chat_page():
                             mode=response_mode,
                             use_web_fallback=use_web_search,
                             chat_history=st.session_state.messages[:-1],
+                            llm_list=llm_list,
                         )
                     )
                 else:

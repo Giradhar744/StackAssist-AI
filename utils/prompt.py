@@ -1,7 +1,7 @@
 # utils/prompt.py
 
 from langchain_core.prompts import PromptTemplate
-from utils.web_search import web_search, RateLimitError, WebSearchError
+from utils.web_search import web_search, is_kb_relevant_query, RateLimitError, WebSearchError
 
 # Casual greetings that should NOT trigger RAG retrieval
 SMALLTALK_TRIGGERS = [
@@ -121,7 +121,8 @@ def generate_rag_response_stream(
     query: str,
     mode: str = "Concise",
     use_web_fallback: bool = True,
-    chat_history: list = None
+    chat_history: list = None,
+    llm_list: list = None  # full ordered list of (provider, model, llm) tuples
 ):
     """
     Full RAG pipeline with streaming support and rate limit fallback to web search:
@@ -160,27 +161,33 @@ def generate_rag_response_stream(
         # Step 2: Rewrite query (gracefully falls back on rate limit)
         search_query = rewrite_query(llm, clean_query, chat_history)
 
-        # Step 3: Retrieve docs
-        docs = retriever.invoke(search_query)
-
+        # Step 3: Retrieve docs — only if query is KB-relevant
+        docs = []
         context = ""
         source = "knowledge base"
 
-        if docs:
-            context = "\n\n".join([doc.page_content for doc in docs])
+        if is_kb_relevant_query(search_query):
+            docs = retriever.invoke(search_query)
+            if docs:
+                context = "\n\n".join([doc.page_content for doc in docs])
+        else:
+            print(f"ℹ️ Query not KB-relevant, skipping retrieval: '{search_query}'")
 
-        # Step 4: Web search if context not relevant
+        # Step 4: Web search if context not relevant or query is general
         web_results_cache = None
 
-        if not is_context_relevant(context, search_query) and use_web_fallback:
+        if (not is_context_relevant(context, search_query) or not is_kb_relevant_query(search_query)) and use_web_fallback:
             print(f"🌐 KB not relevant — web searching: '{search_query}'")
             try:
                 web_results_cache = web_search(search_query)
                 if web_results_cache:
                     context = f"From web search:\n\n{web_results_cache}"
                     source = "web search"
-            except RateLimitError:
-                raise
+            except RateLimitError as e:
+                print(f"⚠️ Web search rate limited: {e}")
+                if not context:
+                    context = "No relevant information found in knowledge base or web search."
+                    source = "none"
             except WebSearchError as e:
                 print(f"⚠️ Web search failed: {e}")
                 if not context:
@@ -235,46 +242,58 @@ Answer:"""
             source=source,
         )
 
-        try:
-            for chunk in llm.stream(final_prompt):
-                yield chunk.content
-            return
+        # Build list of LLMs to try: current llm first, then rest of llm_list
+        candidates = [llm]
+        if llm_list:
+            for (provider, model, candidate_llm) in llm_list:
+                if candidate_llm is not llm:
+                    candidates.append(candidate_llm)
 
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-                print(f"⚠️ Gemini rate limited on generation — falling back to web search")
+        generated = False
+        for i, candidate in enumerate(candidates):
+            try:
+                provider_label = f"LLM #{i+1}" if i > 0 else "primary LLM"
+                if i > 0:
+                    print(f"🔄 Rate limited — switching to {provider_label}")
+                for chunk in candidate.stream(final_prompt):
+                    yield chunk.content
+                generated = True
+                return
+            except Exception as e:
+                err = str(e)
+                if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
+                    print(f"⚠️ {provider_label} rate limited, trying next...")
+                    continue
+                raise RuntimeError(f"LLM generation failed: {err}")
 
-                # Use cached web results if already fetched
-                if web_results_cache:
-                    yield format_web_results_for_user(query, web_results_cache)
-                    return
+        if not generated:
+            # All LLMs rate limited — fall back to web search
+            print("⚠️ All LLMs rate limited — falling back to web search")
 
-                # Otherwise fetch web results now
-                try:
-                    fresh_web = web_search(search_query)
-                    if fresh_web and "Web search error" not in fresh_web:
-                        yield format_web_results_for_user(query, fresh_web)
-                        return
-                except Exception as web_err:
-                    print(f"⚠️ Web search also failed: {web_err}")
-
-                # Both failed — yield clean message
-                yield (
-                    "⚠️ **AI temporarily unavailable** (API rate limit reached) "
-                    "and web search fallback also failed.\n\n"
-                    "Please try again in a few minutes."
-                )
+            if web_results_cache:
+                yield format_web_results_for_user(query, web_results_cache)
                 return
 
-            raise RuntimeError(f"LLM generation failed: {err}")
+            try:
+                fresh_web = web_search(search_query)
+                if fresh_web and "Web search error" not in fresh_web:
+                    yield format_web_results_for_user(query, fresh_web)
+                    return
+            except Exception as web_err:
+                print(f"⚠️ Web search also failed: {web_err}")
 
-    except RateLimitError:
-        raise
+            yield (
+                "⚠️ **All AI models temporarily rate-limited** and web search also failed.\n\n"
+                "Please try again in a few minutes."
+            )
+            return
+
     except Exception as e:
         err = str(e)
         if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-            raise RateLimitError(
-                f"Gemini API quota exceeded. Please wait and try again.\nDetails: {err}"
+            yield (
+                "⚠️ **All AI models temporarily rate-limited.**\n\n"
+                "Please try again in a few minutes."
             )
+            return
         raise RuntimeError(f"RAG pipeline failed: {err}")
