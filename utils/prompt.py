@@ -153,8 +153,12 @@ def generate_rag_response_stream(
                     return
                 raise
 
+        # Step 2: Strip formatting instructions before rewriting/searching
+        import re
+        clean_query = re.sub(r'\s*in\s+\d+\s+words?\.?', '', query, flags=re.IGNORECASE).strip()
+
         # Step 2: Rewrite query (gracefully falls back on rate limit)
-        search_query = rewrite_query(llm, query, chat_history)
+        search_query = rewrite_query(llm, clean_query, chat_history)
 
         # Step 3: Retrieve docs
         docs = retriever.invoke(search_query)
@@ -187,8 +191,13 @@ def generate_rag_response_stream(
             context = "No relevant context available."
             source = "none"
 
-        # Step 5: Response mode
-        if mode == "Detailed":
+        # Step 5: Response mode — also detect user-specified word counts or formatting
+        import re
+        word_count_match = re.search(r'in\s+(\d+)\s+words?', query, re.IGNORECASE)
+        if word_count_match:
+            word_count = word_count_match.group(1)
+            instruction = f"Respond in exactly {word_count} words. Be precise about the word count."
+        elif mode == "Detailed":
             instruction = "Provide a detailed answer with clear explanation and examples. Use steps if needed."
         else:
             instruction = "Provide a short, clear and friendly answer in 3-5 lines."
