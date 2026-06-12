@@ -53,7 +53,7 @@ VECTOR_DB_PATH = os.path.join(BASE_DIR, "vector_db")
 GROQ_MODEL_PRIMARY   = "llama-3.3-70b-versatile"
 GROQ_MODEL_SECONDARY = "gemma2-9b-it"
 
-GEMINI_MODEL_PRIMARY = "gemini-2.0-flash"
+GEMINI_MODEL_PRIMARY = "gemini-2.5-flash"
 GEMINI_LLM_MODEL     = "gemini-2.5-flash-lite"
 
 
